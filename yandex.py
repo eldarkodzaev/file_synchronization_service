@@ -1,17 +1,22 @@
 # Python 3.10.12
 
+# Python 3.10.12
+
 import os
-import datetime
-from datetime import datetime as dt
 import threading
 from urllib.parse import urlencode
 
 import requests
 
 from dotenv import dotenv_values
+from loguru import logger
 
 from abstract_disc import AbstractDisc
 from utils import FilesAnalizer
+from exceptions import GettingURLForUploadException, PatchResourceException
+
+
+logger.add("logs.log", format="{time} {level} {message}", level="DEBUG")
 
 
 class YandexDiskDir(AbstractDisc):
@@ -27,7 +32,7 @@ class YandexDiskDir(AbstractDisc):
         Аргументы:
 
         token - Токен для доступа к удаленному хранилищу
-        cloud_dir_path - Путь к синхронизируемой папке на Яндекс Диске
+        cloud_dir_path - Путь к папке на Яндекс Диске
         local_dir_path - Путь к синхронизируемой локальной папке
         """
         self.token = token
@@ -39,30 +44,12 @@ class YandexDiskDir(AbstractDisc):
             'Authorization': f'OAuth {token}'
         }
 
-    def load(self, local_path: str, cloud_path: str) -> None:
-        # Получаем URL для загрузки файла
+    def load(self, local_path: str, cloud_path: str, overwrite: bool=False) -> None:
         try:
-            url_for_upload = self._get_url_for_upload(cloud_path, overwrite=False)
-        except ConnectionError as e:
-            print(e)
-            return None
+            url_for_upload = self._get_url_for_upload(cloud_path, overwrite=overwrite)
+        except GettingURLForUploadException:
+            logger.error("Ошибка при получении URL для загрузки файла на Яндекс Диск")
 
-        # Загружаем файл по полученному URL
-        self._load_file(
-            local_file_path=f'{local_path}',
-            cloud_file_path=f'{cloud_path}',
-            url_for_upload=url_for_upload,
-        )
-
-    def reload(self, local_path: str, cloud_path: str):
-        # Получаем URL для загрузки файла
-        try:
-            url_for_upload = self._get_url_for_upload(cloud_path, overwrite=True)
-        except ConnectionError as e:
-            print(e)
-            return None
-        
-        # Загружаем файл по полученному URL
         self._load_file(
             local_file_path=f'{local_path}',
             cloud_file_path=f'{cloud_path}',
@@ -70,15 +57,14 @@ class YandexDiskDir(AbstractDisc):
         )
 
     def delete(self, filename: str):
+        url_params = urlencode({'path': f'{self.cloud_dir_path}/{filename}'})
         response = requests.delete(
-            f'{self.resources_url}?path={self.cloud_dir_path}/{filename}',
+            f'{self.resources_url}?{url_params}',
             headers=self.headers,
             timeout=self.timeout
         )
-        if response.status_code == 204:
-            print(f'Файл {filename} удален')
-        else:
-            print('Файл не найден')
+        if response.status_code == requests.codes.no_content:
+            logger.info(f'Файл {filename} удален из Яндекс Диска')
 
     def get_info(self) -> list[dict]:
         url_params = urlencode({'path': self.cloud_dir_path, 'fields': '_embedded.items'})
@@ -96,8 +82,8 @@ class YandexDiskDir(AbstractDisc):
                 cloud_files_list.append({
                     'name': item['name'],
                     'size': item['size'],
-                    'created': item['created'],
-                    'modified': item['modified'],
+                    'created': item['custom_properties']['created_local'],
+                    'modified': item['custom_properties']['modified_local'],
                 })
         return cloud_files_list
     
@@ -113,32 +99,58 @@ class YandexDiskDir(AbstractDisc):
         )
         if response.status_code == 200:
             return response.json()['href']
-        raise ConnectionError('Не удалось получить URL для загрузки файла')
+        raise GettingURLForUploadException('Не удалось получить URL для загрузки файла')
+    
+    def _add_custom_properties(self, local_file_path: str, cloud_file_path: str) -> None:
+        """
+        Добавляет ресурсу параметры size, created_local, modified_local
+        """
+        size = os.stat(local_file_path).st_size
+        created_local = os.path.getctime(local_file_path)
+        modified_local = os.path.getmtime(local_file_path)
+        custom_properties = {
+            "custom_properties": {
+                "size": size,
+                "created_local": created_local,
+                "modified_local": modified_local,
+            }
+        }
+        url_params = urlencode({'path': cloud_file_path})
+        response = requests.patch(
+            f'{self.resources_url}?{url_params}',
+            headers=self.headers,
+            data=str(custom_properties),
+            timeout=self.timeout
+        )
+        if response.status_code != requests.codes.ok:
+            raise PatchResourceException("Не удалось обновить пользовательские данные ресурса")
 
     def _load_file(self, local_file_path: str, cloud_file_path: str, url_for_upload: str) -> None:
         """
         Загружает файл на Яндекс Диск по полученной ссылке
+
+        Аргументы:
+        - local_file_path: путь к локальному файлу
+        - cloud_file_path: путь к файлу на Яндекс Диске
+        - url_for_upload: URL для загрузки файла, полученный методом _get_url_for_upload
         """
         with open(local_file_path, 'rb') as file:
             url_params = urlencode({'path': cloud_file_path})
             response = requests.put(
                 f'{url_for_upload}?{url_params}',
                 files={'file': file},
-                timeout=10
+                timeout=self.timeout
             )
+        self._add_custom_properties(local_file_path, cloud_file_path)
 
-        if response.status_code == 201:
-            print(f'Файл "{local_file_path}" успешно загружен на Яндекс Диск')
-        else:
-            print(response)
-
+        if response.status_code == requests.codes.created:
+            logger.info(f'Файл "{local_file_path}" успешно загружен на Яндекс Диск')
 
 
 class LocalDiscDir:
     """
     Класс для работы с папкой на локальном диске
     """
-    tz = datetime.timezone(offset=datetime.timedelta(0))
 
     def __init__(self, local_dir_path: str) -> None:
         self.local_dir_path = local_dir_path
@@ -149,13 +161,27 @@ class LocalDiscDir:
         for address, _, files in os.walk(self.local_dir_path):
             for file in files:
                 file_path = os.path.join(address, file)
-                local_files_list.append({
-                    'name': file,
-                    'size': os.path.getsize(file_path),
-                    'created': dt.fromtimestamp(int(os.path.getctime(file_path)), self.tz).isoformat(),
-                    'modified': dt.fromtimestamp(int(os.path.getmtime(file_path)), self.tz).isoformat(),
-                })
+                if not self._file_is_hidden(file_path):  # скрытые файлы не будут сканироваться
+                    local_files_list.append({
+                        'name': file,
+                        'size': os.path.getsize(file_path),
+                        'created': os.path.getctime(file_path),
+                        'modified': os.path.getmtime(file_path)
+                    })
         return local_files_list
+    
+    def _file_is_hidden(self, file_path: str) -> bool:
+        """
+        Проверяет является ли файл скрытым
+
+        Аргументы:
+        - file_path - абсолютный путь к файлу
+        """
+        if os.name == 'nt':
+            import win32con, win32api
+            attribute = win32api.GetFileAttributes(file_path)
+            return attribute and (win32con.FILE_ATTRIBUTE_HIDDEN | win32con.FILE_ATTRIBUTE_SYSTEM)
+        return file_path.startswith('.')  # linux/osx
 
 
 def run():
@@ -164,7 +190,7 @@ def run():
     """
     config = dotenv_values('.env')
 
-    # threading.Timer(config['SYNCHRONIZATION_PERIOD'], run).start()
+    threading.Timer(int(config['SYNCHRONIZATION_PERIOD']), run).start()
 
     local_disc_dir = LocalDiscDir(config['LOCAL_DIR_PATH'])
     local_disc_dir_info = local_disc_dir.get_info()
@@ -177,20 +203,27 @@ def run():
     yandex_disc_dir_info = yandex_disc_dir.get_info()
 
     fa = FilesAnalizer(local_disc_dir_info, yandex_disc_dir_info)
-    files = fa.get_files_for_upload()
+    if (for_delete := fa.files_for_delete()):
+        for file in for_delete:
+            yandex_disc_dir.delete(file)
 
-    for file in files:
-        if file['status'] == 'load':
+    if (for_load := fa.files_for_load()):
+        for file in for_load:
+            yandex_disc_dir.load(
+                local_path=f"{config['LOCAL_DIR_PATH']}/{file}",
+                cloud_path=f"{config['CLOUD_DIR_PATH']}/{file}"
+            )
+    
+    if (for_reload := fa.files_for_reload()):
+        for file in for_reload:
             yandex_disc_dir.load(
                 local_path=f"{config['LOCAL_DIR_PATH']}/{file['name']}",
-                cloud_path=f"{config['CLOUD_DIR_PATH']}/{file['name']}"
-            )
-        elif file['status'] == 'reload':
-            yandex_disc_dir.reload(
-                local_path=f"{config['LOCAL_DIR_PATH']}/{file['name']}",
-                cloud_path=f"{config['CLOUD_DIR_PATH']}/{file['name']}"
+                cloud_path=f"{config['CLOUD_DIR_PATH']}/{file['name']}",
+                overwrite=True              
             )
 
 
 if __name__ == '__main__':
+    config = dotenv_values(".env")
+    logger.info(f"Программа синхронизации файлов начинает работу с директорией {config['LOCAL_DIR_PATH']}")
     run()

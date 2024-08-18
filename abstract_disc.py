@@ -11,13 +11,6 @@ class AbstractDisc(ABC):
         pass
 
     @abstractmethod
-    def reload(self, path: str):
-        """
-        Перезапись файла в хранилище
-        """
-        pass
-
-    @abstractmethod
     def delete(self, filename: str):
         """
         Удаление файла из хранилища

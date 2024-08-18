@@ -1,44 +1,46 @@
-from collections import defaultdict
-
-
 class FilesAnalizer:
     """
-    Анализирует файлы, помечая их либо как к загрузке, либо как к обновлению
+    Анализирует файлы, помечая их как к загрузке/обновлению/удалению
     """
 
     def __init__(self, local_files: list[dict], cloud_files: list[dict]) -> None:
         self.local_files = local_files
         self.cloud_files = cloud_files
+    
+    def files_for_load(self):
+        local_files_names = [file['name'] for file in self.local_files]
+        cloud_files_names = [file['name'] for file in self.cloud_files]
 
-    def get_files_for_upload(self):
-        files = self._compare_list_of_dicts()
-        cloud_files_names = [item['name'] for item in self.cloud_files]
-        files_for_upload = []
-        for file in files:
-            if not (file['name'] in cloud_files_names):
-                file['status'] = 'load'
-                files_for_upload.append(file)
-            elif not (file in self.cloud_files):
-                file['status'] = 'reload'
-                files_for_upload.append(file)
-        return files
+        for_load = []
+        for filename in local_files_names:
+            if not(filename in cloud_files_names):
+                for_load.append(filename)
 
-    def _make_hash_table(self, list_of_dicts):
-        hashes = defaultdict(list)
+        return for_load
+    
+    def files_for_delete(self):
+        local_files_names = [file['name'] for file in self.local_files]
+        cloud_files_names = [file['name'] for file in self.cloud_files]
 
-        for i, item in enumerate(list_of_dicts):
-            calculated_hash = hash(frozenset(item.items()))
-            hashes[calculated_hash].append(i)
+        for_delete = []
+        for filename in cloud_files_names:
+            if not(filename in local_files_names):
+                for_delete.append(filename)
 
-        return hashes
+        return for_delete
+    
+    def files_for_reload(self):
+        cloud_files_names = [file['name'] for file in self.cloud_files]
+        for_reload = []
+        for file in self.local_files:
+            if file['name'] in cloud_files_names:
+                cloud_file = self.find_dict_in_list(self.cloud_files, file)
+                if cloud_file != file:
+                    for_reload.append(file)
+        return for_reload
 
-
-    def _compare_list_of_dicts(self):
-        list1_hashes = self._make_hash_table(self.local_files)
-        list2_hashes = self._make_hash_table(self.cloud_files)
-
-        not_in_list2 = [
-            self.local_files[list1_hashes[hash_value][0]]
-            for hash_value in list1_hashes.keys() - list2_hashes.keys()
-        ]
-        return not_in_list2
+    def find_dict_in_list(self, lst: list[dict], dct: dict) -> dict | None:
+        for item in lst:
+            if item['name'] == dct['name']:
+                return item
+        return None
