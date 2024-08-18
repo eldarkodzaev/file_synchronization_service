@@ -10,14 +10,17 @@ class FilesAnalizer:
         self.local_files = local_files
         self.cloud_files = cloud_files
 
-    def get(self):
+    def get_files_for_upload(self):
         files = self._compare_list_of_dicts()
         cloud_files_names = [item['name'] for item in self.cloud_files]
+        files_for_upload = []
         for file in files:
-            if file['name'] not in cloud_files_names:
+            if not (file['name'] in cloud_files_names):
                 file['status'] = 'load'
-            else:
+                files_for_upload.append(file)
+            elif not (file in self.cloud_files):
                 file['status'] = 'reload'
+                files_for_upload.append(file)
         return files
 
     def _make_hash_table(self, list_of_dicts):

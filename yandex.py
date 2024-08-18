@@ -1,7 +1,10 @@
+# Python 3.10.12
+
 import os
 import datetime
 from datetime import datetime as dt
 import threading
+from urllib.parse import urlencode
 
 import requests
 
@@ -17,56 +20,60 @@ class YandexDiskDir(AbstractDisc):
     """
     upload_url = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
     resources_url = 'https://cloud-api.yandex.net/v1/disk/resources'
+    timeout = 10  # таймаут запроса в секундах
 
     def __init__(self, token: str, cloud_dir_path: str, local_dir_path: str) -> None:
         """
         Аргументы:
 
         token - Токен для доступа к удаленному хранилищу
-        cloud_dir_path - Путь к синхронизируемой папке в удаленном хранилище
+        cloud_dir_path - Путь к синхронизируемой папке на Яндекс Диске
         local_dir_path - Путь к синхронизируемой локальной папке
         """
         self.token = token
         self.cloud_dir_path = cloud_dir_path
         self.local_dir_path = local_dir_path
-        self.headers = {'Authorization': f'OAuth {token}'}
+        self.headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json', 
+            'Authorization': f'OAuth {token}'
+        }
 
-    def load(self, path: str):
-        response = requests.get(
-            f'{self.upload_url}?path={path}',
-            headers=self.headers,
-            timeout=3.05
-        )
-        print(response.json())
-        url_for_load = response.json()['href']
-        with open(path, 'rb') as file:
-            response = requests.put(
-                f'{self.upload_url}?path={path}&url={url_for_load}',
-                headers=self.headers,
-                files={'file': file},
-                timeout=3.05
-            )
+    def load(self, local_path: str, cloud_path: str) -> None:
+        # Получаем URL для загрузки файла
+        try:
+            url_for_upload = self._get_url_for_upload(cloud_path, overwrite=False)
+        except ConnectionError as e:
+            print(e)
+            return None
 
-    def reload(self, path: str):
-        response = requests.get(
-            f'{self.upload_url}?path={path}',
-            headers=self.headers,
-            timeout=3.05
+        # Загружаем файл по полученному URL
+        self._load_file(
+            local_file_path=f'{local_path}',
+            cloud_file_path=f'{cloud_path}',
+            url_for_upload=url_for_upload,
         )
-        url_for_load = response.json()['href']
-        with open(path, 'rb') as file:
-            response = requests.put(
-                f'{self.upload_url}?path={path}&url={url_for_load}&overwrite=true',
-                headers=self.headers,
-                files={'file': file},
-                timeout=3.05
-            )
+
+    def reload(self, local_path: str, cloud_path: str):
+        # Получаем URL для загрузки файла
+        try:
+            url_for_upload = self._get_url_for_upload(cloud_path, overwrite=True)
+        except ConnectionError as e:
+            print(e)
+            return None
+        
+        # Загружаем файл по полученному URL
+        self._load_file(
+            local_file_path=f'{local_path}',
+            cloud_file_path=f'{cloud_path}',
+            url_for_upload=url_for_upload,
+        )
 
     def delete(self, filename: str):
         response = requests.delete(
             f'{self.resources_url}?path={self.cloud_dir_path}/{filename}',
             headers=self.headers,
-            timeout=3.05
+            timeout=self.timeout
         )
         if response.status_code == 204:
             print(f'Файл {filename} удален')
@@ -74,10 +81,11 @@ class YandexDiskDir(AbstractDisc):
             print('Файл не найден')
 
     def get_info(self) -> list[dict]:
+        url_params = urlencode({'path': self.cloud_dir_path, 'fields': '_embedded.items'})
         response = requests.get(
-            f'{self.resources_url}?path={self.cloud_dir_path}&fields=_embedded',
+            f'{self.resources_url}?{url_params}',
             headers=self.headers,
-            timeout=3.05
+            timeout=self.timeout
         )
 
         items = response.json()['_embedded']['items']
@@ -92,6 +100,37 @@ class YandexDiskDir(AbstractDisc):
                     'modified': item['modified'],
                 })
         return cloud_files_list
+    
+    def _get_url_for_upload(self, path: str, overwrite: bool) -> None:
+        """
+        Возвращает ссылку для загрузки файла на Яндекс Диск
+        """
+        url = urlencode({'path': path, 'overwrite': overwrite})
+        response = requests.get(
+            f'{self.upload_url}?{url}',
+            headers=self.headers,
+            timeout=self.timeout
+        )
+        if response.status_code == 200:
+            return response.json()['href']
+        raise ConnectionError('Не удалось получить URL для загрузки файла')
+
+    def _load_file(self, local_file_path: str, cloud_file_path: str, url_for_upload: str) -> None:
+        """
+        Загружает файл на Яндекс Диск по полученной ссылке
+        """
+        with open(local_file_path, 'rb') as file:
+            url_params = urlencode({'path': cloud_file_path})
+            response = requests.put(
+                f'{url_for_upload}?{url_params}',
+                files={'file': file},
+                timeout=10
+            )
+
+        if response.status_code == 201:
+            print(f'Файл "{local_file_path}" успешно загружен на Яндекс Диск')
+        else:
+            print(response)
 
 
 
@@ -138,13 +177,19 @@ def run():
     yandex_disc_dir_info = yandex_disc_dir.get_info()
 
     fa = FilesAnalizer(local_disc_dir_info, yandex_disc_dir_info)
-    files = fa.get()
+    files = fa.get_files_for_upload()
 
     for file in files:
         if file['status'] == 'load':
-            yandex_disc_dir.load(f"{config['CLOUD_DIR_PATH']}")
-        else:
-            yandex_disc_dir.reload(f"{config['CLOUD_DIR_PATH']}")
+            yandex_disc_dir.load(
+                local_path=f"{config['LOCAL_DIR_PATH']}/{file['name']}",
+                cloud_path=f"{config['CLOUD_DIR_PATH']}/{file['name']}"
+            )
+        elif file['status'] == 'reload':
+            yandex_disc_dir.reload(
+                local_path=f"{config['LOCAL_DIR_PATH']}/{file['name']}",
+                cloud_path=f"{config['CLOUD_DIR_PATH']}/{file['name']}"
+            )
 
 
 if __name__ == '__main__':
