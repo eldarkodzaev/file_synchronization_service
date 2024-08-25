@@ -35,11 +35,11 @@ class YandexDiskDir(AbstractDisc):
         self.local_dir_path = local_dir_path
         self.headers = {
             'Content-Type': 'application/json',
-            'Accept': 'application/json', 
+            'Accept': 'application/json',
             'Authorization': f'OAuth {token}'
         }
 
-    def load(self, local_file_path: str, cloud_file_path: str, overwrite: bool=False) -> None:
+    def load(self, local_file_path: str, cloud_file_path: str, overwrite: bool = False) -> None:
         """
         Загружает файл в Яндекс Диск
 
@@ -50,9 +50,13 @@ class YandexDiskDir(AbstractDisc):
         """
 
         try:
-            url_for_upload = self._get_url_for_upload(cloud_file_path, overwrite=overwrite)
+            url_for_upload = self._get_url_for_upload(
+                cloud_file_path, overwrite=overwrite
+            )
         except GettingURLForUploadException:
-            logger.exception("Ошибка при получении URL для загрузки файла на Яндекс Диск")
+            logger.exception(
+                "Ошибка при получении URL для загрузки файла на Яндекс Диск"
+            )
 
         self._load_file(
             local_file_path=f'{local_file_path}',
@@ -91,7 +95,7 @@ class YandexDiskDir(AbstractDisc):
         """
 
         url_params = urlencode(
-            {'path': self.cloud_dir_path, 
+            {'path': self.cloud_dir_path,
              'fields': '_embedded.items.name,_embedded.items.size,_embedded.items.custom_properties'}
         )
 
@@ -119,7 +123,7 @@ class YandexDiskDir(AbstractDisc):
                     'modified': item['custom_properties']['modified_local'],
                 })
         return cloud_files_list
-    
+
     def _get_url_for_upload(self, path: str, overwrite: bool) -> None:
         """
         Возвращает ссылку для загрузки файла на Яндекс Диск
@@ -142,7 +146,7 @@ class YandexDiskDir(AbstractDisc):
             if response.status_code == 200:
                 return response.json()['href']
             raise GettingURLForUploadException('Не удалось получить URL для загрузки файла')
-    
+
     def _add_custom_properties(self, local_file_path: str, cloud_file_path: str) -> None:
         """
         Добавляет ресурсу параметры size, created_local, modified_local
@@ -176,9 +180,11 @@ class YandexDiskDir(AbstractDisc):
             logger.error("Ошибка подключения")
         except requests.RequestException:
             logger.error("Ошибка запроса")
-        else:            
+        else:
             if response.status_code != requests.codes.ok:
-                raise PatchResourceException("Не удалось обновить пользовательские данные ресурса")
+                raise PatchResourceException(
+                    "Не удалось обновить пользовательские данные ресурса"
+                )
 
     def _load_file(self, local_file_path: str, cloud_file_path: str, url_for_upload: str) -> None:
         """
@@ -210,7 +216,9 @@ class YandexDiskDir(AbstractDisc):
             logger.exception(e)
 
         if response.status_code == requests.codes.created:
-            logger.info(f'Файл "{local_file_path}" успешно загружен на Яндекс Диск')
+            logger.info(
+                f'Файл "{local_file_path}" успешно загружен на Яндекс Диск'
+            )
 
 
 class LocalDiscDir:
@@ -251,7 +259,7 @@ def run(env: dict) -> None:
         internet_connection_was_broken = True
         logger.error("Нет подключения к интернету!")
         time.sleep(int(env['SYNCHRONIZATION_PERIOD']))
-    
+
     if internet_connection_was_broken:
         logger.info("Подключение к интернету восстановлено!")
 
@@ -264,7 +272,7 @@ def run(env: dict) -> None:
         local_dir_path=env['LOCAL_DIR_PATH']
     )
     yandex_disc_dir_info = yandex_disc_dir.get_info()
-    
+
     if yandex_disc_dir_info:
         fa = FilesAnalizer(local_disc_dir_info, yandex_disc_dir_info)
         if (for_delete := fa.files_for_delete()):
@@ -277,13 +285,13 @@ def run(env: dict) -> None:
                     local_file_path=f"{env['LOCAL_DIR_PATH']}/{file}",
                     cloud_file_path=f"{env['CLOUD_DIR_PATH']}/{file}"
                 )
-        
+
         if (for_reload := fa.files_for_reload()):
             for file in for_reload:
                 yandex_disc_dir.load(
                     local_file_path=f"{env['LOCAL_DIR_PATH']}/{file['name']}",
                     cloud_file_path=f"{env['CLOUD_DIR_PATH']}/{file['name']}",
-                    overwrite=True              
+                    overwrite=True
                 )
     time.sleep(int(env['SYNCHRONIZATION_PERIOD']))
 
