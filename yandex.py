@@ -2,8 +2,6 @@
 
 import os
 import time
-import threading
-import sched
 from urllib.parse import urlencode
 
 import requests
@@ -12,14 +10,8 @@ from dotenv import dotenv_values
 from loguru import logger
 
 from abstract_disc import AbstractDisc
-from utils import FilesAnalizer, check_internet_connection, check_config
 from exceptions import GettingURLForUploadException, PatchResourceException
-
-
-logger.add(
-    "logs.log", format="{time} {level} {message}", 
-    level="INFO", rotation="10 MB", backtrace=True, diagnose=True
-)
+from utils import FilesAnalizer, EnvFileChecker, check_internet_connection
 
 
 class YandexDiskDir(AbstractDisc):
@@ -77,13 +69,21 @@ class YandexDiskDir(AbstractDisc):
         """
 
         url_params = urlencode({'path': f'{self.cloud_dir_path}/{filename}'})
-        response = requests.delete(
-            f'{self.resources_url}?{url_params}',
-            headers=self.headers
-            # timeout=self.timeout
-        )
-        if response.status_code == requests.codes.no_content:
-            logger.info(f'Файл "{filename}" удален из Яндекс Диска')
+        try:
+            response = requests.delete(
+                f'{self.resources_url}?{url_params}',
+                headers=self.headers,
+                timeout=self.timeout
+            )
+        except requests.ConnectTimeout:
+            logger.error("Превышено время ожидания от Яндекс Диска")
+        except requests.ConnectionError:
+            logger.error("Ошибка подключения")
+        except requests.RequestException:
+            logger.error("Ошибка запроса")
+        else:
+            if response.status_code == requests.codes.no_content:
+                logger.info(f'Файл "{filename}" удален из Яндекс Диска')
 
     def get_info(self) -> list[dict]:
         """
@@ -94,22 +94,30 @@ class YandexDiskDir(AbstractDisc):
             {'path': self.cloud_dir_path, 
              'fields': '_embedded.items.name,_embedded.items.size,_embedded.items.custom_properties'}
         )
-        response = requests.get(
-            f'{self.resources_url}?{url_params}',
-            headers=self.headers
-            # timeout=self.timeout
-        )
 
-        items = response.json()['_embedded']['items']
         cloud_files_list: list[dict] = []
+        try:
+            response = requests.get(
+                f'{self.resources_url}?{url_params}',
+                headers=self.headers,
+                timeout=self.timeout
+            )
+        except requests.ConnectTimeout:
+            logger.error("Превышено время ожидания от Яндекс Диска")
+        except requests.ConnectionError:
+            logger.error("Ошибка подключения")
+        except requests.RequestException:
+            logger.error("Ошибка запроса")
+        else:
+            items = response.json()['_embedded']['items']
 
-        for item in items:
-            cloud_files_list.append({
-                'name': item['name'],
-                'size': item['size'],
-                'created': item['custom_properties']['created_local'],
-                'modified': item['custom_properties']['modified_local'],
-            })
+            for item in items:
+                cloud_files_list.append({
+                    'name': item['name'],
+                    'size': item['size'],
+                    'created': item['custom_properties']['created_local'],
+                    'modified': item['custom_properties']['modified_local'],
+                })
         return cloud_files_list
     
     def _get_url_for_upload(self, path: str, overwrite: bool) -> None:
@@ -118,14 +126,22 @@ class YandexDiskDir(AbstractDisc):
         """
 
         url = urlencode({'path': path, 'overwrite': overwrite})
-        response = requests.get(
-            f'{self.upload_url}?{url}',
-            headers=self.headers
-            # timeout=self.timeout
-        )
-        if response.status_code == 200:
-            return response.json()['href']
-        raise GettingURLForUploadException('Не удалось получить URL для загрузки файла')
+        try:
+            response = requests.get(
+                f'{self.upload_url}?{url}',
+                headers=self.headers,
+                timeout=self.timeout
+            )
+        except requests.ConnectTimeout:
+            logger.error("Превышено время ожидания от Яндекс Диска")
+        except requests.ConnectionError:
+            logger.error("Ошибка подключения")
+        except requests.RequestException:
+            logger.error("Ошибка запроса")
+        else:
+            if response.status_code == 200:
+                return response.json()['href']
+            raise GettingURLForUploadException('Не удалось получить URL для загрузки файла')
     
     def _add_custom_properties(self, local_file_path: str, cloud_file_path: str) -> None:
         """
@@ -147,14 +163,22 @@ class YandexDiskDir(AbstractDisc):
             }
         }
         url_params = urlencode({'path': cloud_file_path})
-        response = requests.patch(
-            f'{self.resources_url}?{url_params}',
-            headers=self.headers,
-            data=str(custom_properties)
-            # timeout=self.timeout
-        )
-        if response.status_code != requests.codes.ok:
-            raise PatchResourceException("Не удалось обновить пользовательские данные ресурса")
+        try:
+            response = requests.patch(
+                f'{self.resources_url}?{url_params}',
+                headers=self.headers,
+                data=str(custom_properties),
+                timeout=self.timeout
+            )
+        except requests.ConnectTimeout:
+            logger.error("Превышено время ожидания от Яндекс Диска")
+        except requests.ConnectionError:
+            logger.error("Ошибка подключения")
+        except requests.RequestException:
+            logger.error("Ошибка запроса")
+        else:            
+            if response.status_code != requests.codes.ok:
+                raise PatchResourceException("Не удалось обновить пользовательские данные ресурса")
 
     def _load_file(self, local_file_path: str, cloud_file_path: str, url_for_upload: str) -> None:
         """
@@ -168,11 +192,18 @@ class YandexDiskDir(AbstractDisc):
 
         with open(local_file_path, 'rb') as file:
             url_params = urlencode({'path': cloud_file_path})
-            response = requests.put(
-                f'{url_for_upload}?{url_params}',
-                files={'file': file}
-                # timeout=self.timeout
-            )
+            try:
+                response = requests.put(
+                    f'{url_for_upload}?{url_params}',
+                    files={'file': file},
+                    timeout=self.timeout
+                )
+            except requests.ConnectTimeout:
+                logger.error("Превышено время ожидания от Яндекс Диска")
+            except requests.ConnectionError:
+                logger.error("Ошибка подключения")
+            except requests.RequestException:
+                logger.error("Ошибка запроса")
         try:
             self._add_custom_properties(local_file_path, cloud_file_path)
         except PatchResourceException as e:
@@ -210,7 +241,7 @@ class LocalDiscDir:
         return local_files_list
 
 
-def run(config: dict) -> None:
+def run(env: dict) -> None:
     """
     Запуск скрипта
     """
@@ -219,52 +250,58 @@ def run(config: dict) -> None:
     while not check_internet_connection():
         internet_connection_was_broken = True
         logger.error("Нет подключения к интернету!")
-        time.sleep(int(config['SYNCHRONIZATION_PERIOD']))
+        time.sleep(int(env['SYNCHRONIZATION_PERIOD']))
     
     if internet_connection_was_broken:
         logger.info("Подключение к интернету восстановлено!")
 
-    local_disc_dir = LocalDiscDir(config['LOCAL_DIR_PATH'])
+    local_disc_dir = LocalDiscDir(env['LOCAL_DIR_PATH'])
     local_disc_dir_info = local_disc_dir.get_info()
 
     yandex_disc_dir = YandexDiskDir(
-        token=config['TOKEN'],
-        cloud_dir_path=config['CLOUD_DIR_PATH'],
-        local_dir_path=config['LOCAL_DIR_PATH']
+        token=env['TOKEN'],
+        cloud_dir_path=env['CLOUD_DIR_PATH'],
+        local_dir_path=env['LOCAL_DIR_PATH']
     )
     yandex_disc_dir_info = yandex_disc_dir.get_info()
-
-    fa = FilesAnalizer(local_disc_dir_info, yandex_disc_dir_info)
-    if (for_delete := fa.files_for_delete()):
-        for file in for_delete:
-            yandex_disc_dir.delete(file)
-
-    if (for_load := fa.files_for_load()):
-        for file in for_load:
-            yandex_disc_dir.load(
-                local_file_path=f"{config['LOCAL_DIR_PATH']}/{file}",
-                cloud_file_path=f"{config['CLOUD_DIR_PATH']}/{file}"
-            )
     
-    if (for_reload := fa.files_for_reload()):
-        for file in for_reload:
-            yandex_disc_dir.load(
-                local_file_path=f"{config['LOCAL_DIR_PATH']}/{file['name']}",
-                cloud_file_path=f"{config['CLOUD_DIR_PATH']}/{file['name']}",
-                overwrite=True              
-            )
-    time.sleep(int(config['SYNCHRONIZATION_PERIOD']))
+    if yandex_disc_dir_info:
+        fa = FilesAnalizer(local_disc_dir_info, yandex_disc_dir_info)
+        if (for_delete := fa.files_for_delete()):
+            for file in for_delete:
+                yandex_disc_dir.delete(file)
+
+        if (for_load := fa.files_for_load()):
+            for file in for_load:
+                yandex_disc_dir.load(
+                    local_file_path=f"{env['LOCAL_DIR_PATH']}/{file}",
+                    cloud_file_path=f"{env['CLOUD_DIR_PATH']}/{file}"
+                )
+        
+        if (for_reload := fa.files_for_reload()):
+            for file in for_reload:
+                yandex_disc_dir.load(
+                    local_file_path=f"{env['LOCAL_DIR_PATH']}/{file['name']}",
+                    cloud_file_path=f"{env['CLOUD_DIR_PATH']}/{file['name']}",
+                    overwrite=True              
+                )
+    time.sleep(int(env['SYNCHRONIZATION_PERIOD']))
 
 
 if __name__ == '__main__':
-    config = dotenv_values(".env")
-    if check_config(config):
+    env = dotenv_values(".env")
+    env_checker = EnvFileChecker()
+    if env_checker.check():
+        logger.add(
+            env['LOG_FILE_PATH'], format="{time} {level} {message}",
+            level="INFO", rotation="10 MB", backtrace=True, diagnose=True
+        )
         print("Для выхода из программы нажмите 'Control+C'")
         logger.info(
-            f"Программа синхронизации файлов начинает работу с директорией {config['LOCAL_DIR_PATH']}"
+            f"Программа синхронизации файлов начинает работу с директорией {env['LOCAL_DIR_PATH']}"
         )
         try:
             while True:
-                run(config)
+                run(env)
         except KeyboardInterrupt:
             logger.info("Работа программы завершена")

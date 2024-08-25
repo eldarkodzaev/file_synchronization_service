@@ -1,6 +1,10 @@
 import os
 import urllib
+import urllib.parse
 import urllib.request
+
+import requests
+from dotenv import dotenv_values
 
 
 class FilesAnalizer:
@@ -51,35 +55,117 @@ class FilesAnalizer:
         return None
 
 
+class EnvFileChecker:
+    """
+    Проверяет файл ".env" на наличие ошибок
+    """
+
+    resource_url = "https://cloud-api.yandex.net/v1/disk/resources"
+
+    def __init__(self) -> None:
+        if self._env_file_exists():
+            self.env = dotenv_values(".env")
+
+    def _env_file_exists(self) -> bool:
+        return os.path.exists('.env')
+    
+    def _check_settings(self):
+        pass
+
+    def _check_token(self) -> bool:
+        token = self.env.get('TOKEN')
+        if not token:
+            print('Не найден ключ "TOKEN" в файле ".env"')
+            return False
+        return True
+    
+    def _check_local_dir_path(self) -> bool:
+        local_dir_path = self.env.get('LOCAL_DIR_PATH')
+
+        if not local_dir_path:
+            print('Не найден ключ "LOCAL_DIR_PATH" в файле ".env"')
+            return False
+        
+        if not os.path.isdir(local_dir_path):
+            print(f'Неправильный путь "{local_dir_path}" у параметра "LOCAL_DIR_PATH"')
+            return False
+        
+        return True
+    
+    def _check_cloud_dir_path(self) -> bool:
+        cloud_dir_path = self.env.get('CLOUD_DIR_PATH')
+
+        if not cloud_dir_path:
+            print('Не найден ключ "CLOUD_DIR_PATH" в файле ".env"')
+            return False
+        
+        url_params = urllib.parse.urlencode({'path': cloud_dir_path})
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': f"OAuth {self.env['TOKEN']}"
+        }
+        response = requests.get(
+            f"{self.resource_url}?{url_params}",
+            headers=headers
+        )
+        if response.status_code == requests.codes.not_found:
+            print(f'Папка "{cloud_dir_path}" не найдена на Яндекс Диске')
+            return False
+        if response.status_code == requests.codes.unauthorized:
+            print(f'Неверный токен для доступа к Яндекс Диску')
+            return False
+        
+        return True
+    
+    def _check_log_file_path(self) -> bool:
+        log_file_path = self.env.get('LOG_FILE_PATH')
+
+        if not log_file_path:
+            print('Не найден ключ "LOG_FILE_PATH" в файле ".env"')
+            return False
+        
+        if not os.path.isabs(log_file_path):
+            print(f'Неправильный путь "{log_file_path}" у параметра "LOCAL_DIR_PATH"')
+            return False
+        
+        return True
+    
+
+    def _check_synchronization_period(self) -> bool:
+        sync_period = self.env.get('SYNCHRONIZATION_PERIOD')
+
+        if not sync_period:
+            print('Не найден ключ "SYNCHRONIZATION_PERIOD" в файле ".env"')
+            return False
+        
+        try:
+            int(sync_period)
+        except ValueError:
+            print(f'Параметр "SYNCHRONIZATION_PERIOD" должен быть целым числом')
+            return False
+        
+        return True
+        
+
+
+    def check(self) -> bool:
+        if not self._env_file_exists():
+            print('Файл ".env" не найден. Создайте его в корне проекта и перезапустите программу')
+            return False
+        
+        return all([
+            self._check_token(),
+            self._check_local_dir_path(),
+            self._check_cloud_dir_path(),
+            self._check_log_file_path(),
+            self._check_synchronization_period()
+        ])
+    
+
 def check_internet_connection():
     try:
         urllib.request.urlopen("http://google.com")
     except IOError:
         return False
-    return True
-
-
-def check_config(config: dict):
-    if not os.path.exists('.env'):
-        print('Файл ".env" не найден. Создайте его в корне проекта и перезапустите программу')
-        return False
-    
-    settings = {
-        'TOKEN': str, 
-        'LOCAL_DIR_PATH': str,
-        'CLOUD_DIR_PATH': str,
-        'LOG_FILE_PATH': str,
-        'SYNCHRONIZATION_PERIOD': int
-    }
-    for key, value in settings.items():
-        if not config.get(key):
-            print(f'Неверный файл ".env". В файле должны присутствовать следующие ключи: {list(settings.keys())}. См. файл ".env.dist".')
-            return False
-        else:
-            try:
-                value(config[key])
-            except ValueError:
-                print(f'Параметр "{key}" должен быть типа {value.__name__}. Проверьте файл ".env" и перезапустите программу.')
-                return False
-            
     return True
