@@ -10,7 +10,7 @@ from dotenv import dotenv_values
 from loguru import logger
 
 from abstract_disc import AbstractDisc
-from exceptions import GettingURLForUploadException, PatchResourceException
+from exceptions import GettingURLForUploadException, PatchResourceException, MethodNotAllowedException
 from utils import FilesAnalizer, EnvFileChecker, check_internet_connection
 
 
@@ -21,6 +21,12 @@ class YandexDiskDir(AbstractDisc):
     upload_url = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
     resources_url = 'https://cloud-api.yandex.net/v1/disk/resources'
     timeout = 10  # таймаут запроса в секундах
+    allowed_methods = {
+        'get': requests.get,
+        'put': requests.put,
+        'patch': requests.patch,
+        'delete': requests.delete
+    }
 
     def __init__(self, token: str, cloud_dir_path: str, local_dir_path: str) -> None:
         """
@@ -73,19 +79,12 @@ class YandexDiskDir(AbstractDisc):
         """
 
         url_params = urlencode({'path': f'{self.cloud_dir_path}/{filename}'})
-        try:
-            response = requests.delete(
-                f'{self.resources_url}?{url_params}',
-                headers=self.headers,
-                timeout=self.timeout
-            )
-        except requests.ConnectTimeout:
-            logger.error("Превышено время ожидания от Яндекс Диска")
-        except requests.ConnectionError:
-            logger.error("Ошибка подключения")
-        except requests.RequestException:
-            logger.error("Ошибка запроса")
-        else:
+        response = self._make_request(
+            request_method='delete',
+            url=f'{self.resources_url}?{url_params}', 
+            headers=self.headers
+        )
+        if isinstance(response, requests.Response):
             if response.status_code == requests.codes.no_content:
                 logger.info(f'Файл "{filename}" удален из Яндекс Диска')
 
@@ -100,19 +99,12 @@ class YandexDiskDir(AbstractDisc):
         )
 
         cloud_files_list: list[dict] = []
-        try:
-            response = requests.get(
-                f'{self.resources_url}?{url_params}',
-                headers=self.headers,
-                timeout=self.timeout
-            )
-        except requests.ConnectTimeout:
-            logger.error("Превышено время ожидания от Яндекс Диска")
-        except requests.ConnectionError:
-            logger.error("Ошибка подключения")
-        except requests.RequestException:
-            logger.error("Ошибка запроса")
-        else:
+        response = self._make_request(
+            request_method='get',
+            url=f'{self.resources_url}?{url_params}',
+            headers=self.headers
+        )
+        if isinstance(response, requests.Response):
             items = response.json()['_embedded']['items']
 
             for item in items:
@@ -130,19 +122,12 @@ class YandexDiskDir(AbstractDisc):
         """
 
         url = urlencode({'path': path, 'overwrite': overwrite})
-        try:
-            response = requests.get(
-                f'{self.upload_url}?{url}',
-                headers=self.headers,
-                timeout=self.timeout
-            )
-        except requests.ConnectTimeout:
-            logger.error("Превышено время ожидания от Яндекс Диска")
-        except requests.ConnectionError:
-            logger.error("Ошибка подключения")
-        except requests.RequestException:
-            logger.error("Ошибка запроса")
-        else:
+        response = self._make_request(
+            request_method='get',
+            url=f'{self.upload_url}?{url}',
+            headers=self.headers
+        )
+        if isinstance(response, requests.Response):
             if response.status_code == 200:
                 return response.json()['href']
             raise GettingURLForUploadException('Не удалось получить URL для загрузки файла')
@@ -167,20 +152,13 @@ class YandexDiskDir(AbstractDisc):
             }
         }
         url_params = urlencode({'path': cloud_file_path})
-        try:
-            response = requests.patch(
-                f'{self.resources_url}?{url_params}',
-                headers=self.headers,
-                data=str(custom_properties),
-                timeout=self.timeout
-            )
-        except requests.ConnectTimeout:
-            logger.error("Превышено время ожидания от Яндекс Диска")
-        except requests.ConnectionError:
-            logger.error("Ошибка подключения")
-        except requests.RequestException:
-            logger.error("Ошибка запроса")
-        else:
+        response = self._make_request(
+            request_method='patch',
+            url=f'{self.resources_url}?{url_params}',
+            headers=self.headers,
+            data=str(custom_properties)
+        )
+        if isinstance(response, requests.Response):
             if response.status_code != requests.codes.ok:
                 raise PatchResourceException(
                     "Не удалось обновить пользовательские данные ресурса"
@@ -198,18 +176,11 @@ class YandexDiskDir(AbstractDisc):
 
         with open(local_file_path, 'rb') as file:
             url_params = urlencode({'path': cloud_file_path})
-            try:
-                response = requests.put(
-                    f'{url_for_upload}?{url_params}',
-                    files={'file': file},
-                    timeout=self.timeout
-                )
-            except requests.ConnectTimeout:
-                logger.error("Превышено время ожидания от Яндекс Диска")
-            except requests.ConnectionError:
-                logger.error("Ошибка подключения")
-            except requests.RequestException:
-                logger.error("Ошибка запроса")
+            response = self._make_request(
+                request_method='put',
+                url=f'{url_for_upload}?{url_params}',
+                files={'file': file}
+            )
         try:
             self._add_custom_properties(local_file_path, cloud_file_path)
         except PatchResourceException as e:
@@ -219,6 +190,44 @@ class YandexDiskDir(AbstractDisc):
             logger.info(
                 f'Файл "{local_file_path}" успешно загружен на Яндекс Диск'
             )
+    
+    def _make_request(
+            self,
+            request_method: str,
+            url: str,
+            headers: dict | None = None,
+            data: dict | None = None,
+            files: dict | None = None
+        ) -> requests.Response | Exception:
+        """
+        Посылает запрос и обрбатывает ошибки
+        """
+
+        method = request_method.lower()
+
+        if not (method in self.allowed_methods.keys()):
+            logger.error(f'Ошибка запроса: метод "{method}" не поддерживается')
+            return MethodNotAllowedException
+
+        try:
+            response = self.allowed_methods[method](
+                url,
+                headers=headers,
+                data=data,
+                files=files,
+                timeout=self.timeout
+            )
+        except requests.ConnectTimeout as e:
+            logger.error("Превышено время ожидания от Яндекс Диска")
+            return e
+        except requests.ConnectionError as e:
+            logger.error("Ошибка подключения")
+            return e
+        except requests.RequestException as e:
+            logger.error("Ошибка запроса")
+            return e        
+
+        return response
 
 
 class LocalDiscDir:
@@ -273,7 +282,7 @@ def run(env: dict) -> None:
     )
     yandex_disc_dir_info = yandex_disc_dir.get_info()
 
-    if yandex_disc_dir_info:
+    if yandex_disc_dir_info or local_disc_dir_info:
         fa = FilesAnalizer(local_disc_dir_info, yandex_disc_dir_info)
         if (for_delete := fa.files_for_delete()):
             for file in for_delete:

@@ -160,7 +160,10 @@ class EnvFileChecker:
         ])
 
 
-def check_internet_connection():
+def check_internet_connection() -> bool:
+    """
+    Проверяет наличие интернет-соединения
+    """
     try:
         urllib.request.urlopen("http://google.com")
     except IOError:
