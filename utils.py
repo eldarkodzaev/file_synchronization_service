@@ -1,3 +1,8 @@
+import os
+import urllib
+import urllib.request
+
+
 class FilesAnalizer:
     """
     Анализирует файлы, помечая их как к загрузке/обновлению/удалению
@@ -44,3 +49,37 @@ class FilesAnalizer:
             if item['name'] == dct['name']:
                 return item
         return None
+
+
+def check_internet_connection():
+    try:
+        urllib.request.urlopen("http://google.com")
+    except IOError:
+        return False
+    return True
+
+
+def check_config(config: dict):
+    if not os.path.exists('.env'):
+        print('Файл ".env" не найден. Создайте его в корне проекта и перезапустите программу')
+        return False
+    
+    settings = {
+        'TOKEN': str, 
+        'LOCAL_DIR_PATH': str,
+        'CLOUD_DIR_PATH': str,
+        'LOG_FILE_PATH': str,
+        'SYNCHRONIZATION_PERIOD': int
+    }
+    for key, value in settings.items():
+        if not config.get(key):
+            print(f'Неверный файл ".env". В файле должны присутствовать следующие ключи: {list(settings.keys())}. См. файл ".env.dist".')
+            return False
+        else:
+            try:
+                value(config[key])
+            except ValueError:
+                print(f'Параметр "{key}" должен быть типа {value.__name__}. Проверьте файл ".env" и перезапустите программу.')
+                return False
+            
+    return True
