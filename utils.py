@@ -69,9 +69,6 @@ class EnvFileChecker:
     def _env_file_exists(self) -> bool:
         return os.path.exists('.env')
 
-    def _check_settings(self):
-        pass
-
     def _check_token(self) -> bool:
         token = self.env.get('TOKEN')
         if not token:
@@ -109,6 +106,7 @@ class EnvFileChecker:
             f"{self.resource_url}?{url_params}",
             headers=headers
         )
+        
         if response.status_code == requests.codes.not_found:
             print(f'Папка "{cloud_dir_path}" не найдена на Яндекс Диске')
             return False
@@ -125,8 +123,8 @@ class EnvFileChecker:
             print('Не найден ключ "LOG_FILE_PATH" в файле ".env"')
             return False
 
-        if not os.path.isabs(log_file_path):
-            print(f'Неправильный путь "{log_file_path}" у параметра "LOCAL_DIR_PATH"')
+        if not os.path.isfile(log_file_path):
+            print(f'Неправильный путь "{log_file_path}" у параметра "LOG_FILE_PATH"')
             return False
 
         return True
