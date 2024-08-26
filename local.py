@@ -1,11 +1,13 @@
 import os
 import stat
+import platform
 
 
 class LocalDiscDir:
     """
     Класс для работы с папкой на локальном диске
     """
+    plt = platform.system()
 
     def __init__(self, local_dir_path: str) -> None:
         self.local_dir_path = local_dir_path
@@ -29,9 +31,13 @@ class LocalDiscDir:
                     })
         return local_files_list
 
-    def file_is_hidden(self, file):
+    def file_is_hidden(self, file_path: str) -> bool:
         """
         Проверяет, является ли файл скрытым
         """
-        info = os.stat(file)
+        if self.plt in ('Linux', 'Darwin',):
+            return os.path.basename(file_path).startswith('.')
+        
+        # if Windows
+        info = os.stat(file_path)
         return info.st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN

@@ -283,7 +283,7 @@ if __name__ == '__main__':
     env_checker = EnvFileChecker()
     if env_checker.check():
         logger.add(
-            env['LOG_FILE_PATH'], format="{time} {level} {message}",
+            os.path.join(env['LOG_FILE_PATH'], 'logs.log'), format="{time} {level} {message}",
             level="INFO", rotation="10 MB", backtrace=True, diagnose=True
         )
         print("Для выхода из программы нажмите 'Control+C'")

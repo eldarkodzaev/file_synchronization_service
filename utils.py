@@ -17,6 +17,10 @@ class FilesAnalizer:
         self.cloud_files = cloud_files
 
     def files_for_load(self):
+        """
+        Возвращает файлы для загрузки
+        """
+
         local_files_names = [file['name'] for file in self.local_files]
         cloud_files_names = [file['name'] for file in self.cloud_files]
 
@@ -28,6 +32,10 @@ class FilesAnalizer:
         return for_load
 
     def files_for_delete(self):
+        """
+        Возвращает файлы для удаления
+        """
+
         local_files_names = [file['name'] for file in self.local_files]
         cloud_files_names = [file['name'] for file in self.cloud_files]
 
@@ -39,16 +47,19 @@ class FilesAnalizer:
         return for_delete
 
     def files_for_reload(self):
+        """
+        Возвращает файлы для перезаписи
+        """
         cloud_files_names = [file['name'] for file in self.cloud_files]
         for_reload = []
         for file in self.local_files:
             if file['name'] in cloud_files_names:
-                cloud_file = self.find_dict_in_list(self.cloud_files, file)
+                cloud_file = self._find_dict_in_list(self.cloud_files, file)
                 if cloud_file != file:
                     for_reload.append(file)
         return for_reload
 
-    def find_dict_in_list(self, lst: list[dict], dct: dict) -> dict | None:
+    def _find_dict_in_list(self, lst: list[dict], dct: dict) -> dict | None:
         for item in lst:
             if item['name'] == dct['name']:
                 return item
@@ -123,7 +134,7 @@ class EnvFileChecker:
             print('Не найден ключ "LOG_FILE_PATH" в файле ".env"')
             return False
 
-        if not os.path.isfile(log_file_path):
+        if not os.path.isdir(log_file_path):
             print(f'Неправильный путь "{log_file_path}" у параметра "LOG_FILE_PATH"')
             return False
 
@@ -145,6 +156,10 @@ class EnvFileChecker:
         return True
 
     def check(self) -> bool:
+        """
+        Запускает полную проверку файла ".env"
+        """
+
         if not self._env_file_exists():
             print('Файл ".env" не найден. Создайте его в корне проекта и перезапустите программу')
             return False
