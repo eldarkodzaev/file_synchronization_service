@@ -5,12 +5,12 @@ import time
 from urllib.parse import urlencode
 
 import requests
-
 from dotenv import dotenv_values
 from loguru import logger
 
 from abstract_disc import AbstractDisc
 from exceptions import GettingURLForUploadException, PatchResourceException, MethodNotAllowedException
+from local import LocalDiscDir
 from utils import FilesAnalizer, EnvFileChecker, check_internet_connection
 
 
@@ -78,7 +78,8 @@ class YandexDiskDir(AbstractDisc):
         - filename: имя файла, который нужно удалить
         """
 
-        url_params = urlencode({'path': f'{self.cloud_dir_path}/{filename}'})
+        file_path = f'{self.cloud_dir_path}/{filename}'
+        url_params = urlencode({'path': file_path})
         response = self._make_request(
             request_method='delete',
             url=f'{self.resources_url}?{url_params}', 
@@ -86,7 +87,7 @@ class YandexDiskDir(AbstractDisc):
         )
         if isinstance(response, requests.Response):
             if response.status_code == requests.codes.no_content:
-                logger.info(f'Файл "{filename}" удален из Яндекс Диска')
+                logger.info(f'Файл "{file_path}" удален из Яндекс Диска')
 
     def get_info(self) -> list[dict]:
         """
@@ -188,7 +189,7 @@ class YandexDiskDir(AbstractDisc):
 
         if response.status_code == requests.codes.created:
             logger.info(
-                f'Файл "{local_file_path}" успешно загружен на Яндекс Диск'
+                f'Файл "{os.path.normpath(local_file_path)}" успешно загружен на Яндекс Диск'
             )
     
     def _make_request(
@@ -228,34 +229,6 @@ class YandexDiskDir(AbstractDisc):
             return e        
 
         return response
-
-
-class LocalDiscDir:
-    """
-    Класс для работы с папкой на локальном диске
-    """
-
-    def __init__(self, local_dir_path: str) -> None:
-        self.local_dir_path = local_dir_path
-
-    def get_info(self) -> list[dict]:
-        """
-        Возвращает информацию о файлах в локальной папке
-        """
-
-        local_files_list: list[dict] = []
-
-        for address, _, files in os.walk(self.local_dir_path):
-            for file in files:
-                file_path = os.path.join(address, file)
-                if not (file.startswith('.')):  # скрытые файлы не будут сканироваться
-                    local_files_list.append({
-                        'name': file,
-                        'size': os.path.getsize(file_path),
-                        'created': os.path.getctime(file_path),
-                        'modified': os.path.getmtime(file_path)
-                    })
-        return local_files_list
 
 
 def run(env: dict) -> None:
