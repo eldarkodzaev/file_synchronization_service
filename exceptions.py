@@ -4,3 +4,7 @@ class GettingURLForUploadException(BaseException):
 
 class PatchResourceException(BaseException):
     pass
+
+
+class MethodNotAllowedException(BaseException):
+    pass
